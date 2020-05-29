@@ -4,6 +4,8 @@ package main
 import (
 	"crypto/tls"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	_ "github.com/lib/pq"
 	"github.com/streadway/amqp"
 	"log"
@@ -39,7 +41,7 @@ func main() {
 	failOnError(err, "Failed to connect to v1.files queue")
 	go func() {
 		for delivery := range filesDeliveries {
-			forwardDeliveryTo(cegaConsumeChannel, legaPubishChannel, "", "files", delivery)
+			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "files", delivery)
 		}
 	}()
 
@@ -47,7 +49,7 @@ func main() {
 	failOnError(err, "Failed to connect to v1.stableIDs queue")
 	go func() {
 		for delivery := range stableIDsDeliveries {
-			forwardDeliveryTo(cegaConsumeChannel, legaPubishChannel, "", "stableIDs", delivery)
+			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "stableIDs", delivery)
 		}
 	}()
 
@@ -59,7 +61,7 @@ func main() {
 	failOnError(err, "Failed to connect to error queue")
 	go func() {
 		for delivery := range errorDeliveries {
-			forwardDeliveryTo(legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.error", delivery)
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.error", delivery)
 		}
 	}()
 
@@ -71,7 +73,7 @@ func main() {
 	failOnError(err, "Failed to connect to processing queue")
 	go func() {
 		for delivery := range processingDeliveries {
-			forwardDeliveryTo(legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.processing", delivery)
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.processing", delivery)
 		}
 	}()
 
@@ -83,7 +85,7 @@ func main() {
 	failOnError(err, "Failed to connect to completed queue")
 	go func() {
 		for delivery := range completedDeliveries {
-			forwardDeliveryTo(legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.completed", delivery)
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.completed", delivery)
 		}
 	}()
 
@@ -92,10 +94,16 @@ func main() {
 	<-forever
 }
 
-func forwardDeliveryTo(channelFrom *amqp.Channel, channelTo *amqp.Channel, exchange string, routingKey string, delivery amqp.Delivery) {
+func forwardDeliveryTo(fromCEGAToLEGA bool, channelFrom *amqp.Channel, channelTo *amqp.Channel, exchange string, routingKey string, delivery amqp.Delivery) {
 	mappingMutex.Lock()
 	defer mappingMutex.Unlock()
-	err := channelTo.Publish(exchange, routingKey, false, false, buildPublishingFromDelivery(delivery))
+	publishing, err := buildPublishingFromDelivery(fromCEGAToLEGA, delivery)
+	if err != nil {
+		log.Printf("%s", err)
+		err := channelFrom.Nack(delivery.DeliveryTag, false, true)
+		failOnError(err, "Failed to Nack message")
+	}
+	err = channelTo.Publish(exchange, routingKey, false, false, *publishing)
 	if err != nil {
 		log.Printf("%s", err)
 		err := channelFrom.Nack(delivery.DeliveryTag, false, true)
@@ -107,8 +115,8 @@ func forwardDeliveryTo(channelFrom *amqp.Channel, channelTo *amqp.Channel, excha
 	}
 }
 
-func buildPublishingFromDelivery(delivery amqp.Delivery) amqp.Publishing {
-	return amqp.Publishing{
+func buildPublishingFromDelivery(fromCEGAToLEGA bool, delivery amqp.Delivery) (*amqp.Publishing, error) {
+	publishing := amqp.Publishing{
 		Headers:         delivery.Headers,
 		ContentType:     delivery.ContentType,
 		ContentEncoding: delivery.ContentEncoding,
@@ -122,8 +130,50 @@ func buildPublishingFromDelivery(delivery amqp.Delivery) amqp.Publishing {
 		Type:            delivery.Type,
 		UserId:          delivery.UserId,
 		AppId:           delivery.AppId,
-		Body:            delivery.Body,
 	}
+
+	message := make(map[string]interface{}, 0)
+	err := json.Unmarshal(delivery.Body, &message)
+	if err != nil {
+		return nil, err
+	}
+	user, ok := message["user"]
+	if !ok {
+		publishing.Body = delivery.Body
+		return &publishing, nil
+	}
+
+	stringUser := fmt.Sprintf("%s", user)
+
+	if fromCEGAToLEGA {
+		elixirId, err := selectElixirIdByEGAId(stringUser)
+		if err != nil {
+			return nil, err
+		}
+		message["user"] = elixirId
+	} else {
+		egaId, err := selectEgaIdByElixirId(stringUser)
+		if err != nil {
+			return nil, err
+		}
+		message["user"] = egaId
+	}
+
+	publishing.Body, err = json.Marshal(message)
+
+	return &publishing, err
+}
+
+func selectElixirIdByEGAId(egaId string) (elixirId string, err error) {
+	err = db.QueryRow("select elixir_id from mapping where ega_id = $1", egaId).Scan(&elixirId)
+	log.Printf("Replacing EGA ID [%s] with Elixir ID [%s]", egaId, elixirId)
+	return
+}
+
+func selectEgaIdByElixirId(elixirId string) (egaId string, err error) {
+	err = db.QueryRow("select ega_id from mapping where elixir_id = $1", elixirId).Scan(&egaId)
+	log.Printf("Replacing Elixir ID [%s] with EGA ID [%s]", elixirId, egaId)
+	return
 }
 
 func getTLSConfig() *tls.Config {
