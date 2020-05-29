@@ -21,19 +21,19 @@ func main() {
 	//db, err = sql.Open("postgres", os.Getenv("DB_CONNECTION"))
 	//failOnError(err, "Failed to connect to DB")
 
-	cegaMQ, err := amqp.DialTLS(os.Getenv("CEGA_MQ_CONNECTION"), getTLSConfig())
-	failOnError(err, "Failed to connect to CEGA RabbitMQ")
-	cegaConsumeChannel, err := cegaMQ.Channel()
-	failOnError(err, "Failed to create CEGA consume RabbitMQ channel")
-	cegaPublishChannel, err := cegaMQ.Channel()
-	failOnError(err, "Failed to create CEGA publish RabbitMQ channel")
-
 	legaMQ, err := amqp.DialTLS(os.Getenv("LEGA_MQ_CONNECTION"), getTLSConfig())
 	failOnError(err, "Failed to connect to LEGA RabbitMQ")
 	legaConsumeChannel, err := legaMQ.Channel()
 	failOnError(err, "Failed to create LEGA consume RabbitMQ channel")
 	legaPubishChannel, err := legaMQ.Channel()
 	failOnError(err, "Failed to create LEGA publish RabbitMQ channel")
+
+	cegaMQ, err := amqp.DialTLS(os.Getenv("CEGA_MQ_CONNECTION"), getTLSConfig())
+	failOnError(err, "Failed to connect to CEGA RabbitMQ")
+	cegaConsumeChannel, err := cegaMQ.Channel()
+	failOnError(err, "Failed to create CEGA consume RabbitMQ channel")
+	cegaPublishChannel, err := cegaMQ.Channel()
+	failOnError(err, "Failed to create CEGA publish RabbitMQ channel")
 
 	filesDeliveries, err := cegaConsumeChannel.Consume("v1.files", "", false, false, false, false, nil)
 	failOnError(err, "Failed to connect to v1.files queue")
@@ -97,11 +97,14 @@ func forwardDeliveryTo(channelFrom *amqp.Channel, channelTo *amqp.Channel, excha
 	defer mappingMutex.Unlock()
 	err := channelTo.Publish(exchange, routingKey, false, false, buildPublishingFromDelivery(delivery))
 	if err != nil {
+		log.Printf("%s", err)
 		err := channelFrom.Nack(delivery.DeliveryTag, false, true)
 		failOnError(err, "Failed to Nack message")
+	} else {
+		err = channelFrom.Ack(delivery.DeliveryTag, false)
+		failOnError(err, "Failed to Ack message")
+		log.Printf("Forwarded message from [%s, %s] to [%s, %s], Correlation ID: %s", delivery.Exchange, delivery.RoutingKey, exchange, routingKey, delivery.CorrelationId)
 	}
-	err = channelFrom.Ack(delivery.DeliveryTag, false)
-	failOnError(err, "Failed to Ack message")
 }
 
 func buildPublishingFromDelivery(delivery amqp.Delivery) amqp.Publishing {
