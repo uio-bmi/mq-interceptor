@@ -3,7 +3,7 @@ package main
 
 import (
 	"crypto/tls"
-	_ "database/sql"
+	"database/sql"
 	_ "github.com/lib/pq"
 	"github.com/streadway/amqp"
 	"log"
@@ -11,15 +11,15 @@ import (
 	"sync"
 )
 
-//var db *sql.DB
+var db *sql.DB
 
 var mappingMutex sync.Mutex
 
 func main() {
 	var err error
 
-	//db, err = sql.Open("postgres", os.Getenv("DB_CONNECTION"))
-	//failOnError(err, "Failed to connect to DB")
+	db, err = sql.Open("postgres", os.Getenv("POSTGRES_CONNECTION"))
+	failOnError(err, "Failed to connect to DB")
 
 	legaMQ, err := amqp.DialTLS(os.Getenv("LEGA_MQ_CONNECTION"), getTLSConfig())
 	failOnError(err, "Failed to connect to LEGA RabbitMQ")
