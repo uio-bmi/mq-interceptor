@@ -14,8 +14,8 @@ import (
 )
 
 var db *sql.DB
-
 var mappingMutex sync.Mutex
+var cegaPublishChannel *amqp.Channel
 
 func main() {
 	var err error
@@ -34,7 +34,7 @@ func main() {
 	failOnError(err, "Failed to connect to CEGA RabbitMQ")
 	cegaConsumeChannel, err := cegaMQ.Channel()
 	failOnError(err, "Failed to create CEGA consume RabbitMQ channel")
-	cegaPublishChannel, err := cegaMQ.Channel()
+	cegaPublishChannel, err = cegaMQ.Channel()
 	failOnError(err, "Failed to create CEGA publish RabbitMQ channel")
 
 	filesDeliveries, err := cegaConsumeChannel.Consume("v1.files", "", false, false, false, false, nil)
@@ -100,8 +100,10 @@ func forwardDeliveryTo(fromCEGAToLEGA bool, channelFrom *amqp.Channel, channelTo
 	publishing, err := buildPublishingFromDelivery(fromCEGAToLEGA, delivery)
 	if err != nil {
 		log.Printf("%s", err)
-		err := channelFrom.Nack(delivery.DeliveryTag, false, true)
-		failOnError(err, "Failed to Nack message")
+		nackError := channelFrom.Nack(delivery.DeliveryTag, false, false)
+		failOnError(nackError, "Failed to Nack message")
+		err = publishError(delivery, err)
+		failOnError(err, "Failed to publish error message")
 	}
 	err = channelTo.Publish(exchange, routingKey, false, false, *publishing)
 	if err != nil {
@@ -164,15 +166,31 @@ func buildPublishingFromDelivery(fromCEGAToLEGA bool, delivery amqp.Delivery) (*
 	return &publishing, err
 }
 
+func publishError(delivery amqp.Delivery, err error) error {
+	errorMessage := fmt.Sprintf("{\"reason\" : \"%s\", \"original_message\" : \"%s\"}", err.Error(), string(delivery.Body))
+	publishing := amqp.Publishing{
+		ContentType:     delivery.ContentType,
+		ContentEncoding: delivery.ContentEncoding,
+		CorrelationId:   delivery.CorrelationId,
+		Body:            []byte(errorMessage),
+	}
+	err = cegaPublishChannel.Publish("localega.v1", "files.error", false, false, publishing)
+	return err
+}
+
 func selectElixirIdByEGAId(egaId string) (elixirId string, err error) {
 	err = db.QueryRow("select elixir_id from mapping where ega_id = $1", egaId).Scan(&elixirId)
-	log.Printf("Replacing EGA ID [%s] with Elixir ID [%s]", egaId, elixirId)
+	if err == nil {
+		log.Printf("Replacing EGA ID [%s] with Elixir ID [%s]", egaId, elixirId)
+	}
 	return
 }
 
 func selectEgaIdByElixirId(elixirId string) (egaId string, err error) {
 	err = db.QueryRow("select ega_id from mapping where elixir_id = $1", elixirId).Scan(&egaId)
-	log.Printf("Replacing Elixir ID [%s] with EGA ID [%s]", elixirId, egaId)
+	if err == nil {
+		log.Printf("Replacing Elixir ID [%s] with EGA ID [%s]", elixirId, egaId)
+	}
 	return
 }
 
