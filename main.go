@@ -38,7 +38,7 @@ func main() {
 	failOnError(err, "Failed to create CEGA publish RabbitMQ channel")
 
 	filesDeliveries, err := cegaConsumeChannel.Consume("v1.files", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to v1.files queue")
+	failOnError(err, "Failed to connect to 'v1.files' queue")
 	go func() {
 		for delivery := range filesDeliveries {
 			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "files", delivery)
@@ -46,7 +46,7 @@ func main() {
 	}()
 
 	stableIDsDeliveries, err := cegaConsumeChannel.Consume("v1.stableIDs", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to v1.stableIDs queue")
+	failOnError(err, "Failed to connect to 'v1.stableIDs' queue")
 	go func() {
 		for delivery := range stableIDsDeliveries {
 			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "stableIDs", delivery)
@@ -54,35 +54,35 @@ func main() {
 	}()
 
 	errorQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
-	failOnError(err, "Failed to declare error queue")
+	failOnError(err, "Failed to declare 'error' queue")
 	err = legaConsumeChannel.QueueBind(errorQueue.Name, "files.error", "cega", false, nil)
-	failOnError(err, "Failed to bind error queue")
+	failOnError(err, "Failed to bind 'error' queue")
 	errorDeliveries, err := legaConsumeChannel.Consume(errorQueue.Name, "", false, true, false, false, nil)
-	failOnError(err, "Failed to connect to error queue")
+	failOnError(err, "Failed to connect to 'error' queue")
 	go func() {
 		for delivery := range errorDeliveries {
 			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.error", delivery)
 		}
 	}()
 
-	processingQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
-	failOnError(err, "Failed to declare processing queue")
-	err = legaConsumeChannel.QueueBind(processingQueue.Name, "files.processing", "cega", false, nil)
-	failOnError(err, "Failed to bind processing queue")
-	processingDeliveries, err := legaConsumeChannel.Consume(processingQueue.Name, "", false, true, false, false, nil)
-	failOnError(err, "Failed to connect to processing queue")
+	verifiedQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
+	failOnError(err, "Failed to declare 'verified' queue")
+	err = legaConsumeChannel.QueueBind(verifiedQueue.Name, "verified", "lega", false, nil)
+	failOnError(err, "Failed to bind 'verified' queue")
+	verifiedDeliveries, err := legaConsumeChannel.Consume(verifiedQueue.Name, "", false, true, false, false, nil)
+	failOnError(err, "Failed to connect to 'verified' queue")
 	go func() {
-		for delivery := range processingDeliveries {
-			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.processing", delivery)
+		for delivery := range verifiedDeliveries {
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.verified", delivery)
 		}
 	}()
 
 	completedQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
-	failOnError(err, "Failed to declare completed queue")
+	failOnError(err, "Failed to declare 'completed' queue")
 	err = legaConsumeChannel.QueueBind(completedQueue.Name, "completed", "lega", false, nil)
-	failOnError(err, "Failed to bind completed queue")
+	failOnError(err, "Failed to bind 'completed' queue")
 	completedDeliveries, err := legaConsumeChannel.Consume(completedQueue.Name, "", false, true, false, false, nil)
-	failOnError(err, "Failed to connect to completed queue")
+	failOnError(err, "Failed to connect to 'completed' queue")
 	go func() {
 		for delivery := range completedDeliveries {
 			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.completed", delivery)
