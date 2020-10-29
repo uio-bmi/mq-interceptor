@@ -1,6 +1,6 @@
 module github.com/uio-bmi/mq-interceptor
 
-go 1.14
+go 1.15
 
 require (
 	github.com/lib/pq v1.8.0

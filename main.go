@@ -53,6 +53,14 @@ func main() {
 		}
 	}()
 
+	mappingsDeliveries, err := cegaConsumeChannel.Consume("mapping_copy", "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to 'mapping_copy' queue")
+	go func() {
+		for delivery := range mappingsDeliveries {
+			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "mappings", delivery)
+		}
+	}()
+
 	errorQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
 	failOnError(err, "Failed to declare 'error' queue")
 	err = legaConsumeChannel.QueueBind(errorQueue.Name, "files.error", "cega", false, nil)
