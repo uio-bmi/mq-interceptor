@@ -53,8 +53,8 @@ func main() {
 		}
 	}()
 
-	mappingsDeliveries, err := cegaConsumeChannel.Consume("mapping_copy", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to 'mapping_copy' queue")
+	mappingsDeliveries, err := cegaConsumeChannel.Consume("v1.mapping", "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to 'v1.mapping' queue")
 	go func() {
 		for delivery := range mappingsDeliveries {
 			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "mappings", delivery)
