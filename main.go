@@ -110,7 +110,9 @@ func forwardDeliveryTo(fromCEGAToLEGA bool, channelFrom *amqp.Channel, channelTo
 	} else {
 		err = channelFrom.Ack(delivery.DeliveryTag, false)
 		failOnError(err, "Failed to Ack message")
-		log.Printf("Forwarded message from [%s, %s] to [%s, %s], Correlation ID: %s", delivery.Exchange, delivery.RoutingKey, exchange, routingKey, delivery.CorrelationId)
+		log.Printf("Forwarded message from [%s, %s] to [%s, %s]", delivery.Exchange, delivery.RoutingKey, exchange, routingKey)
+		log.Printf("Correlation ID: %s", delivery.CorrelationId)
+		log.Printf("Message: %s", string(delivery.Body))
 	}
 }
 
