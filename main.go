@@ -100,6 +100,14 @@ func main() {
 		}
 	}()
 
+	completedDeliveries, err := legaConsumeChannel.Consume("inbox", "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to 'inbox' queue")
+	go func() {
+		for delivery := range completedDeliveries {
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, cegaExchange, "files.inbox", delivery)
+		}
+	}()
+
 	forever := make(chan bool)
 	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
 	<-forever
