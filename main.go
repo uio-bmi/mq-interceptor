@@ -100,10 +100,10 @@ func main() {
 		}
 	}()
 
-	completedDeliveries, err := legaConsumeChannel.Consume("inbox", "", false, false, false, false, nil)
+	inboxDeliveries, err := legaConsumeChannel.Consume("inbox", "", false, false, false, false, nil)
 	failOnError(err, "Failed to connect to 'inbox' queue")
 	go func() {
-		for delivery := range completedDeliveries {
+		for delivery := range inboxDeliveries {
 			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, cegaExchange, "files.inbox", delivery)
 		}
 	}()
