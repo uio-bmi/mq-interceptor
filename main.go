@@ -14,7 +14,7 @@ import (
 )
 
 var db *sql.DB
-var mappingMutex sync.Mutex
+var publishMutex sync.Mutex
 var cegaPublishChannel *amqp.Channel
 
 func main() {
@@ -29,6 +29,11 @@ func main() {
 	failOnError(err, "Failed to create LEGA consume RabbitMQ channel")
 	legaPubishChannel, err := legaMQ.Channel()
 	failOnError(err, "Failed to create LEGA publish RabbitMQ channel")
+	legaNotifyCloseChannel := legaMQ.NotifyClose(make(chan *amqp.Error))
+	go func() {
+		err := <-legaNotifyCloseChannel
+		log.Fatal(err)
+	}()
 
 	cegaMQ, err := amqp.DialTLS(os.Getenv("CEGA_MQ_CONNECTION"), getTLSConfig())
 	failOnError(err, "Failed to connect to CEGA RabbitMQ")
@@ -36,64 +41,70 @@ func main() {
 	failOnError(err, "Failed to create CEGA consume RabbitMQ channel")
 	cegaPublishChannel, err = cegaMQ.Channel()
 	failOnError(err, "Failed to create CEGA publish RabbitMQ channel")
-
-	filesDeliveries, err := cegaConsumeChannel.Consume("v1.files", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to 'v1.files' queue")
+	cegaNotifyCloseChannel := cegaMQ.NotifyClose(make(chan *amqp.Error))
 	go func() {
-		for delivery := range filesDeliveries {
-			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "files", delivery)
+		err := <-cegaNotifyCloseChannel
+		log.Fatal(err)
+	}()
+
+	cegaQueue := os.Getenv("CEGA_MQ_QUEUE")
+	cegaExchange := os.Getenv("CEGA_MQ_EXCHANGE")
+	legaExchange := os.Getenv("LEGA_MQ_EXCHANGE")
+
+	cegaDeliveries, err := cegaConsumeChannel.Consume(cegaQueue, "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to CEGA queue: "+cegaQueue)
+	go func() {
+		for delivery := range cegaDeliveries {
+			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
 		}
 	}()
 
-	stableIDsDeliveries, err := cegaConsumeChannel.Consume("v1.stableIDs", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to 'v1.stableIDs' queue")
+	// TODO: <begin>Temp WA, remove after migrating to a single queue</begin>
+	stableIDDeliveries, err := cegaConsumeChannel.Consume("v1.stableIDs", "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to CEGA queue: v1.stableIDs")
 	go func() {
-		for delivery := range stableIDsDeliveries {
-			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "stableIDs", delivery)
+		for delivery := range stableIDDeliveries {
+			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
 		}
 	}()
-
-	mappingsDeliveries, err := cegaConsumeChannel.Consume("v1.mapping", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to 'v1.mapping' queue")
+	mappingDeliveries, err := cegaConsumeChannel.Consume("v1.mapping", "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to CEGA queue: v1.mapping")
 	go func() {
-		for delivery := range mappingsDeliveries {
-			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, "", "mappings", delivery)
+		for delivery := range mappingDeliveries {
+			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
 		}
 	}()
+	// TODO: <end>Temp WA, remove after migrating to a single queue</end>
 
-	errorQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
-	failOnError(err, "Failed to declare 'error' queue")
-	err = legaConsumeChannel.QueueBind(errorQueue.Name, "files.error", "cega", false, nil)
-	failOnError(err, "Failed to bind 'error' queue")
-	errorDeliveries, err := legaConsumeChannel.Consume(errorQueue.Name, "", false, true, false, false, nil)
+	errorDeliveries, err := legaConsumeChannel.Consume("error", "", false, false, false, false, nil)
 	failOnError(err, "Failed to connect to 'error' queue")
 	go func() {
 		for delivery := range errorDeliveries {
-			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.error", delivery)
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, cegaExchange, "files.error", delivery)
 		}
 	}()
 
-	verifiedQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
-	failOnError(err, "Failed to declare 'verified' queue")
-	err = legaConsumeChannel.QueueBind(verifiedQueue.Name, "verified", "lega", false, nil)
-	failOnError(err, "Failed to bind 'verified' queue")
-	verifiedDeliveries, err := legaConsumeChannel.Consume(verifiedQueue.Name, "", false, true, false, false, nil)
+	verifiedDeliveries, err := legaConsumeChannel.Consume("verified", "", false, false, false, false, nil)
 	failOnError(err, "Failed to connect to 'verified' queue")
 	go func() {
 		for delivery := range verifiedDeliveries {
-			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.verified", delivery)
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, cegaExchange, "files.verified", delivery)
 		}
 	}()
 
-	completedQueue, err := legaConsumeChannel.QueueDeclare("", false, false, true, false, nil)
-	failOnError(err, "Failed to declare 'completed' queue")
-	err = legaConsumeChannel.QueueBind(completedQueue.Name, "completed", "lega", false, nil)
-	failOnError(err, "Failed to bind 'completed' queue")
-	completedDeliveries, err := legaConsumeChannel.Consume(completedQueue.Name, "", false, true, false, false, nil)
+	completedDeliveries, err := legaConsumeChannel.Consume("completed", "", false, false, false, false, nil)
 	failOnError(err, "Failed to connect to 'completed' queue")
 	go func() {
 		for delivery := range completedDeliveries {
-			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, "localega.v1", "files.completed", delivery)
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, cegaExchange, "files.completed", delivery)
+		}
+	}()
+
+	inboxDeliveries, err := legaConsumeChannel.Consume("inbox", "", false, false, false, false, nil)
+	failOnError(err, "Failed to connect to 'inbox' queue")
+	go func() {
+		for delivery := range inboxDeliveries {
+			forwardDeliveryTo(false, legaConsumeChannel, cegaPublishChannel, cegaExchange, "files.inbox", delivery)
 		}
 	}()
 
@@ -103,15 +114,18 @@ func main() {
 }
 
 func forwardDeliveryTo(fromCEGAToLEGA bool, channelFrom *amqp.Channel, channelTo *amqp.Channel, exchange string, routingKey string, delivery amqp.Delivery) {
-	mappingMutex.Lock()
-	defer mappingMutex.Unlock()
-	publishing, err := buildPublishingFromDelivery(fromCEGAToLEGA, delivery)
+	publishMutex.Lock()
+	defer publishMutex.Unlock()
+	publishing, messageType, err := buildPublishingFromDelivery(fromCEGAToLEGA, delivery)
 	if err != nil {
 		log.Printf("%s", err)
 		nackError := channelFrom.Nack(delivery.DeliveryTag, false, false)
 		failOnError(nackError, "Failed to Nack message")
 		err = publishError(delivery, err)
 		failOnError(err, "Failed to publish error message")
+	}
+	if messageType != nil {
+		routingKey = messageType.(string)
 	}
 	err = channelTo.Publish(exchange, routingKey, false, false, *publishing)
 	if err != nil {
@@ -121,11 +135,13 @@ func forwardDeliveryTo(fromCEGAToLEGA bool, channelFrom *amqp.Channel, channelTo
 	} else {
 		err = channelFrom.Ack(delivery.DeliveryTag, false)
 		failOnError(err, "Failed to Ack message")
-		log.Printf("Forwarded message from [%s, %s] to [%s, %s], Correlation ID: %s", delivery.Exchange, delivery.RoutingKey, exchange, routingKey, delivery.CorrelationId)
+		log.Printf("Forwarded message from [%s, %s] to [%s, %s]", delivery.Exchange, delivery.RoutingKey, exchange, routingKey)
+		log.Printf("Correlation ID: %s", delivery.CorrelationId)
+		log.Printf("Message: %s", string(delivery.Body))
 	}
 }
 
-func buildPublishingFromDelivery(fromCEGAToLEGA bool, delivery amqp.Delivery) (*amqp.Publishing, error) {
+func buildPublishingFromDelivery(fromCEGAToLEGA bool, delivery amqp.Delivery) (*amqp.Publishing, interface{}, error) {
 	publishing := amqp.Publishing{
 		Headers:         delivery.Headers,
 		ContentType:     delivery.ContentType,
@@ -145,12 +161,15 @@ func buildPublishingFromDelivery(fromCEGAToLEGA bool, delivery amqp.Delivery) (*
 	message := make(map[string]interface{}, 0)
 	err := json.Unmarshal(delivery.Body, &message)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	messageType, _ := message["type"]
+
 	user, ok := message["user"]
 	if !ok {
 		publishing.Body = delivery.Body
-		return &publishing, nil
+		return &publishing, messageType, nil
 	}
 
 	stringUser := fmt.Sprintf("%s", user)
@@ -158,20 +177,20 @@ func buildPublishingFromDelivery(fromCEGAToLEGA bool, delivery amqp.Delivery) (*
 	if fromCEGAToLEGA {
 		elixirId, err := selectElixirIdByEGAId(stringUser)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		message["user"] = elixirId
 	} else {
 		egaId, err := selectEgaIdByElixirId(stringUser)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		message["user"] = egaId
 	}
 
 	publishing.Body, err = json.Marshal(message)
 
-	return &publishing, err
+	return &publishing, messageType, err
 }
 
 func publishError(delivery amqp.Delivery, err error) error {
@@ -182,7 +201,7 @@ func publishError(delivery amqp.Delivery, err error) error {
 		CorrelationId:   delivery.CorrelationId,
 		Body:            []byte(errorMessage),
 	}
-	err = cegaPublishChannel.Publish("localega.v1", "files.error", false, false, publishing)
+	err = cegaPublishChannel.Publish(os.Getenv("CEGA_MQ_EXCHANGE"), "files.error", false, false, publishing)
 	return err
 }
 
