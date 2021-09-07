@@ -60,20 +60,20 @@ func main() {
 	}()
 
 	// TODO: <begin>Temp WA, remove after migrating to a single queue</begin>
-	stableIDDeliveries, err := cegaConsumeChannel.Consume("v1.stableIDs", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to CEGA queue: v1.stableIDs")
-	go func() {
-		for delivery := range stableIDDeliveries {
-			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
-		}
-	}()
-	mappingDeliveries, err := cegaConsumeChannel.Consume("v1.mapping", "", false, false, false, false, nil)
-	failOnError(err, "Failed to connect to CEGA queue: v1.mapping")
-	go func() {
-		for delivery := range mappingDeliveries {
-			forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
-		}
-	}()
+	// stableIDDeliveries, err := cegaConsumeChannel.Consume("v1.stableIDs", "", false, false, false, false, nil)
+	// failOnError(err, "Failed to connect to CEGA queue: v1.stableIDs")
+	// go func() {
+	// 	for delivery := range stableIDDeliveries {
+	// 		forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
+	// 	}
+	// }()
+	// mappingDeliveries, err := cegaConsumeChannel.Consume("v1.mapping", "", false, false, false, false, nil)
+	// failOnError(err, "Failed to connect to CEGA queue: v1.mapping")
+	// go func() {
+	// 	for delivery := range mappingDeliveries {
+	// 		forwardDeliveryTo(true, cegaConsumeChannel, legaPubishChannel, legaExchange, "", delivery)
+	// 	}
+	// }()
 	// TODO: <end>Temp WA, remove after migrating to a single queue</end>
 
 	errorDeliveries, err := legaConsumeChannel.Consume("error", "", false, false, false, false, nil)
