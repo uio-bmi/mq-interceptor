@@ -124,7 +124,10 @@ func forwardDeliveryTo(fromCEGAToLEGA bool, channelFrom *amqp.Channel, channelTo
 		err = publishError(delivery, err)
 		failOnError(err, "Failed to publish error message")
 	}
-	if messageType != nil {
+	// Forward all messages from CEGA to a local queue handled by the SDA intercept service
+	if fromCEGAToLEGA {
+		routingKey = os.Getenv("LEGA_MQ_QUEUE")
+	} else if messageType != nil {
 		routingKey = messageType.(string)
 	}
 	err = channelTo.Publish(exchange, routingKey, false, false, *publishing)
