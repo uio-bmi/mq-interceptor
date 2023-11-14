@@ -1,33 +1,12 @@
-name: Bump version and publish to ghcr.io
+name: Publish Docker image to ghcr.io
 on:
-  push:
-    branches:
-    - master
+  release:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-  tag:
-    name: bump tags
-    outputs:
-      part: ${{ steps.bump_tag.outputs.part }}
-      tag: ${{ steps.bump_tag.outputs.tag }}
-      new_tag: ${{ steps.bump_tag.outputs.new_tag }}
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        fetch-depth: '1'
-
-    - name: Bump version and push tag
-      id: bump_tag
-      uses: anothrNick/github-tag-action@1.36.0
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        WITH_V: true
-        DEFAULT_BUMP: patch
-
   push_to_registry:
-    needs: tag
-    if: needs.tag.outputs.part != ''
     name: Push Docker image to Github Container registry
     runs-on: ubuntu-latest
     permissions:
@@ -57,7 +36,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.tag.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.event.repository.clone_url }}
